@@ -1,11 +1,12 @@
 import asyncpg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ---------------------------
+# Replace this with your actual database URL
+# Format: postgresql://username:password@host:port/dbname
+DATABASE_URL = "postgresql://postgres:Gav051031_@db.dkarbwwnjyttgdmdjydq.supabase.co:5432/postgres"
+
 
 app = FastAPI(title="Chess Checkmate API")
 
@@ -22,7 +23,8 @@ class Checkmate(BaseModel):
 # Database helper
 # ---------------------------
 async def get_connection():
-    return await asyncpg.connect(DATABASE_URL)
+    # Use SSL if needed (common for cloud DBs like Supabase)
+    return await asyncpg.connect(DATABASE_URL, ssl="require")
 
 # ---------------------------
 # Root endpoint
@@ -39,7 +41,6 @@ async def get_all_checkmates():
     conn = await get_connection()
     rows = await conn.fetch("SELECT * FROM chess.checkmate ORDER BY id")
     await conn.close()
-    # Convert asyncpg Record to dict
     return [dict(row) for row in rows]
 
 # ---------------------------
