@@ -2,10 +2,13 @@ import asyncpg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+# ---------------------------
+# Get database URL from Render environment
+# ---------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set in environment variables")
 
 app = FastAPI(title="Chess Checkmate API")
 
@@ -19,16 +22,27 @@ class Checkmate(BaseModel):
     solution_moves: str
 
 # ---------------------------
-# Database helper
+# Create connection pool for asyncpg
+# ---------------------------
+@app.on_event("startup")
+async def startup():
+    app.state.db_pool = await asyncpg.create_pool(DATABASE_URL)
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.db_pool.close()
+
+# ---------------------------
+# Helper to get a connection from pool
 # ---------------------------
 async def get_connection():
-    return await asyncpg.connect(DATABASE_URL)
+    return app.state.db_pool.acquire()
 
 # ---------------------------
 # Root endpoint
 # ---------------------------
 @app.get("/")
-def home():
+async def home():
     return {"message": "FastAPI Chess API is running!"}
 
 # ---------------------------
@@ -36,10 +50,8 @@ def home():
 # ---------------------------
 @app.get("/checkmates")
 async def get_all_checkmates():
-    conn = await get_connection()
-    rows = await conn.fetch("SELECT * FROM chess.checkmate ORDER BY id")
-    await conn.close()
-    # Convert asyncpg Record to dict
+    async with app.state.db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM chess.checkmate ORDER BY id")
     return [dict(row) for row in rows]
 
 # ---------------------------
@@ -47,9 +59,8 @@ async def get_all_checkmates():
 # ---------------------------
 @app.get("/checkmates/{checkmate_id}")
 async def get_checkmate(checkmate_id: int):
-    conn = await get_connection()
-    row = await conn.fetchrow("SELECT * FROM chess.checkmate WHERE id = $1", checkmate_id)
-    await conn.close()
+    async with app.state.db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM chess.checkmate WHERE id = $1", checkmate_id)
     if row:
         return dict(row)
     raise HTTPException(status_code=404, detail="Checkmate not found")
@@ -59,14 +70,15 @@ async def get_checkmate(checkmate_id: int):
 # ---------------------------
 @app.post("/checkmates")
 async def create_checkmate(checkmate: Checkmate):
-    conn = await get_connection()
-    query = """
-        INSERT INTO chess.checkmate(fen, type, difficulty_level, solution_moves)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *
-    """
-    row = await conn.fetchrow(query, checkmate.fen, checkmate.type, checkmate.difficulty_level, checkmate.solution_moves)
-    await conn.close()
+    async with app.state.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO chess.checkmate(fen, type, difficulty_level, solution_moves)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+            """,
+            checkmate.fen, checkmate.type, checkmate.difficulty_level, checkmate.solution_moves
+        )
     return dict(row)
 
 # ---------------------------
@@ -74,15 +86,16 @@ async def create_checkmate(checkmate: Checkmate):
 # ---------------------------
 @app.put("/checkmates/{checkmate_id}")
 async def update_checkmate(checkmate_id: int, checkmate: Checkmate):
-    conn = await get_connection()
-    query = """
-        UPDATE chess.checkmate
-        SET fen = $1, type = $2, difficulty_level = $3, solution_moves = $4
-        WHERE id = $5
-        RETURNING *
-    """
-    row = await conn.fetchrow(query, checkmate.fen, checkmate.type, checkmate.difficulty_level, checkmate.solution_moves, checkmate_id)
-    await conn.close()
+    async with app.state.db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE chess.checkmate
+            SET fen = $1, type = $2, difficulty_level = $3, solution_moves = $4
+            WHERE id = $5
+            RETURNING *
+            """,
+            checkmate.fen, checkmate.type, checkmate.difficulty_level, checkmate.solution_moves, checkmate_id
+        )
     if row:
         return dict(row)
     raise HTTPException(status_code=404, detail="Checkmate not found")
@@ -92,9 +105,8 @@ async def update_checkmate(checkmate_id: int, checkmate: Checkmate):
 # ---------------------------
 @app.delete("/checkmates/{checkmate_id}")
 async def delete_checkmate(checkmate_id: int):
-    conn = await get_connection()
-    row = await conn.fetchrow("DELETE FROM chess.checkmate WHERE id = $1 RETURNING *", checkmate_id)
-    await conn.close()
+    async with app.state.db_pool.acquire() as conn:
+        row = await conn.fetchrow("DELETE FROM chess.checkmate WHERE id = $1 RETURNING *", checkmate_id)
     if row:
         return {"message": f"Checkmate with id {checkmate_id} deleted"}
     raise HTTPException(status_code=404, detail="Checkmate not found")
