@@ -1,8 +1,11 @@
 import asyncpg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
 
-DATABASE_URL= "postgresql://postgres:Gav051031_@db.dkarbwwnjyttgdmdjydq.supabase.co:5432/postgres"
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 app = FastAPI(title="Chess Checkmate API")
 
